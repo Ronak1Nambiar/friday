@@ -1,0 +1,39 @@
+# Publish to npm when a version tag is pushed: git tag v0.1.1 && git push origin v0.1.1
+# Trusted publishing (OIDC): no npm token is stored anywhere. npm accepts the publish
+# because it comes from this workflow in this repo (set up once on npmjs.com:
+# friday-agents → Settings → Trusted Publisher → GitHub Actions, workflow publish.yml).
+name: Publish to npm
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write   # lets npm verify this run came from this repo and workflow
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@latest
+
+      - name: The tag matches package.json
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json version $v"; exit 1
+          fi
+
+      - run: npm test
+
+      - run: npm publish
