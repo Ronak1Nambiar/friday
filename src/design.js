@@ -58,6 +58,19 @@ export function watchHandoff(file, cb, { interval = 1000 } = {}) {
 }
 
 export function designPrompt({ request, app, ds, handoff }) {
+  // A link pasted with the request: the design is already made; read it, don't redo it.
+  if (ds?.source === 'link') return `FRIDAY design step (${cap(userName())} asked FRIDAY: "${request}").
+
+The design for ${app.display || app.name}${app.dir ? ` (repo ${app.dir})` : ''} already exists in Claude Design: ${ds.link} (project ${ds.project}).
+Do not make a new design. Read that one with your Artifact tool (action "read" on the link), and compare it with the repo's current UI.
+
+Rules:
+- Do not change any file in the repo. This step turns the design into a spec, not code.
+- Write this JSON to ${handoff} (outside the repo) as soon as you have read it:
+  {"link": "${ds.link}", "revision": 1, "spec": "<everything the implementer needs: layout, colors and tokens/CSS variables with values, typography, components to add or change, states, per screen>"}
+  FRIDAY reads that file and shows ${userName()} the link.
+- If the link cannot be read, say so here and stop; do not invent a design.
+- Then wait for ${userPossessive()} feedback here. If they change the design, write the file again with revision + 1. They approve in FRIDAY with /approve.`;
   return `FRIDAY design step (${cap(userName())} asked FRIDAY: "${request}").
 
 Make this design in Claude Design with your Artifact tool (Design type), for ${app.display || app.name}${app.dir ? ` (repo ${app.dir})` : ''}.

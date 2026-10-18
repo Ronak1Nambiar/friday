@@ -6,7 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { abilityLines } from './abilities.js';
-import { AGENTS, MODES, availableAgents, closeLive, describeTool, geminiLoggedIn, ollamaLoaded, ollamaUp, runTurn, sessionExited, settleAgents, touchedPaths, warmLive, which } from './agents.js';
+import { AGENTS, MODES, availableAgents, closeLive, describeTool, geminiLoggedIn, ollamaLoaded, ollamaUp, runTurn, sessionExited, settleAgents, touchedPaths, warmLive, which, winCommand } from './agents.js';
 import { createLedger, detectBilling } from './billing.js';
 import { addTurn, ago, createConvoStore, dumpSessions, loadSessions, newConvo, summarize } from './convos.js';
 import {
@@ -98,10 +98,14 @@ export function openTerminal(cmd, { cwd = process.cwd(), detach = false } = {}) 
   } else if (process.platform === 'darwin') {
     tries.push(['osascript', ['-e', `tell application "Terminal" to do script "${cmd.map(q).join(' ').replace(/"/g, '\\"')}"`]]);
   } else if (process.platform === 'win32') {
+    // wt starts the program itself, so an npm .cmd shim (claude.cmd) is "not found":
+    // run the .exe (or node + script) the shim points at. wt splits commands at `;`.
+    const r = winCommand(cmd[0], []);
+    const wcmd = (r.shell ? cmd : [r.file, ...r.args, ...cmd.slice(1)]).map((a) => a.replace(/;/g, '\\;'));
     // Inside Windows Terminal: a pane beside this one. Elsewhere `-w 0` would split
     // whichever WT window was used last, so open a window of its own.
-    if (process.env.WT_SESSION) tries.push(['wt', ['-w', '0', 'split-pane', '-V', '--size', '0.6', '-d', cwd, ...cmd]]);
-    tries.push(['wt', ['-w', 'new', 'new-tab', '--title', 'FRIDAY HUD', '-d', cwd, ...cmd]]);
+    if (process.env.WT_SESSION) tries.push(['wt', ['-w', '0', 'split-pane', '-V', '--size', '0.6', '-d', cwd, ...wcmd]]);
+    tries.push(['wt', ['-w', 'new', 'new-tab', '--title', 'FRIDAY HUD', '-d', cwd, ...wcmd]]);
     // cmd.exe parses its own command line: built by hand, or Node's quoting of the
     // window title ("\"FRIDAY HUD\"") makes `start` treat the title as the program.
     tries.push(['cmd', ['/d', '/s', '/c', `"start "FRIDAY HUD" ${cmd.map(winArg).join(' ')}"`], { windowsVerbatimArguments: true }]);
@@ -2357,7 +2361,7 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
     const handoff = path.join(CONFIG_DIR, 'design', `${id}.json`);
     fs.mkdirSync(path.dirname(handoff), { recursive: true });
     const ds = linked || findDesignSystem(app, profile());
-    st.design = { id, request: text, app: { name: app.name, display: app.display || app.name, dir: app.dir || null }, ds, handoff, phase: ds ? 'design' : 'needs-ds' };
+    st.design = { id, request: text, app: { name: app.name, display: app.display || app.name, dir: app.dir || null }, ds, handoff, phase: ds ? 'design' : 'needs-ds', link: linked?.link };
     if (!ds && again) out(dim(`  asked again, so designing ${st.design.app.display} without a design system\n`));
     else if (!ds) {
       out(`  ${bold(st.design.app.display)} has no Claude Design system yet. Designing from one uses the app's real components and tokens; creating it takes a while.\n`);

@@ -14,7 +14,11 @@ test('a pasted claude.ai/design link becomes the design project, and prompts wor
   assert.equal(ds.link, 'https://claude.ai/design/p/22DA50C4-c281-4e36-baec-9db40616b4ea');
   assert.equal(findDesignSystem(app, { designSystems: { thoughtspace: { project: ds.project, link: ds.link } } }).project, ds.project);
   const prompt = designPrompt({ request: 'r', app, ds, handoff: '/cfg/design/1.json' });
-  assert.match(prompt, /Claude Design project 22da50c4[\s\S]*claude\.ai\/design\/p\//);
+  assert.match(prompt, /already exists in Claude Design: https:\/\/claude\.ai\/design\/p\/22DA50C4/);
+  assert.match(prompt, /Do not make a new design/);
+  assert.match(prompt, /"link": "https:\/\/claude\.ai\/design\/p\/22DA50C4-c281-4e36-baec-9db40616b4ea"/);
+  const saved = findDesignSystem(app, { designSystems: { thoughtspace: { project: ds.project, link: ds.link } } });
+  assert.match(designPrompt({ request: 'r', app, ds: saved, handoff: '/h.json' }), /Work in the Claude Design project 22da50c4/);
   assert.match(resyncPrompt({ app, ds, branch: 'b' }), /\.design-sync\/NOTES\.md \(create it/);
 });
 
