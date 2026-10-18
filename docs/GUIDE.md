@@ -37,7 +37,7 @@ How the code fits together: [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Run
 
 ```sh
-npm i -g github:Ronak1Nambiar/friday   # then `friday` anywhere
+npm i -g friday-agents        # then `friday` anywhere
 friday setup                  # agents, sign-ins, the brain, your name, optional vault and Telegram
 node bin/friday.js            # in the current folder
 node bin/friday.js ~/Projects/my-app

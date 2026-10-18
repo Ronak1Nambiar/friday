@@ -40,7 +40,7 @@ background while it asks for your go on your phone.
 ## Quick install
 
 ```sh
-npm i -g github:Ronak1Nambiar/friday
+npm i -g friday-agents
 friday setup
 ```
 

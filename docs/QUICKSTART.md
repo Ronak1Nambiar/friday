@@ -17,6 +17,13 @@ You need:
 Then:
 
 ```sh
+npm i -g friday-agents        # the `friday` command, in any folder
+friday setup
+```
+
+Or from source:
+
+```sh
 git clone https://github.com/Ronak1Nambiar/friday
 cd friday
 npm link                      # adds a `friday` command you can run in any folder

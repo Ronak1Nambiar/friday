@@ -1,5 +1,5 @@
 {
-  "name": "@ronak1nambiar/friday",
+  "name": "friday-agents",
   "version": "0.1.0",
   "description": "Use every AI subscription you already pay for: one terminal cockpit that drives Claude Code, Codex, Gemini, opencode and Ollama, runs missions in the background (research, build on a branch, cross-AI review, fixes) and asks you on your phone.",
   "type": "module",
