@@ -207,6 +207,44 @@ auto ❯ the selfmod tests might fail on windows, find out why, but do not chang
 
 `/orchestrate` shows status; `/orchestrate on|off` (saved to `profile.json`).
 
+## The agent tree
+
+FRIDAY is the root: the brain (`/brain`; e.g. Codex `gpt-6-astra`). Every provider is a
+limb, and every limb runs twigs: small subagents, each a fresh headless turn with its own
+model, many at once. The brain hands them out with one `dispatch` tool call, gets every
+answer back, and writes the combined answer (`src/tree.js`).
+
+```
+auto ❯ use five sonnets: each names one different benefit of unit tests
+◈ FRIDAY → 5 subagents
+  ├─ ① claude · sonnet  Name one benefit of unit tests… catching regressions…
+  ├─ ② claude · sonnet  … documenting expected behavior…
+  ...
+  └─ ⑤ claude · sonnet  … reducing manual verification…
+  ✓ ① claude · sonnet · 3.8s
+  ...
+  5/5 done
+● 1. Catches regressions … 5. Encourages better code design.
+```
+
+- **Limbs**: `claude`, `codex`, `gemini`, `opencode` (CLIs: files, code, shell) and
+  `openrouter`, `ollama` (chat models: text only, so no file or web parts). A limb is offered
+  only when it can run: installed and signed in, OpenRouter with a key, Ollama running.
+- **Twigs**: `tier` small or large picks the limb's model; `max` is how many run at once.
+  Defaults: Claude ×5 (small `sonnet`, large `opus`), Codex ×2 (`gpt-6-luna`, `gpt-6-astra`),
+  Gemini ×2, opencode ×2, OpenRouter ×4, Ollama ×1; at most `maxTwigs` (8) per dispatch.
+- **Safe by default**: twigs run read-only. A part marked `writes` runs alone, after the
+  readers, in your current mode (plan stays plan), so two twigs never edit one checkout at
+  once. A part a limb cannot run moves to one that can (file work only to a CLI limb).
+- **Sealed and private** rules hold for every twig, as for any turn.
+- **When the brain uses it**: work that splits into independent parts, or when you ask for
+  several agents or models ("five sonnets", "have every agent check this"). One task still
+  goes to one agent. `Ctrl+C` stops the running twigs and skips the rest.
+
+`/tree` draws the tree with each limb's state, limits and models; `/tree on|off`. Limits
+and models live in `profile.json` under `"tree"` (`limbs.<name>.max`, `.models.small|large`,
+`maxTwigs`, `twigTimeoutMs`, `resultChars`).
+
 ## Missions
 
 For a job with phases ("I want to build X, research it first"), FRIDAY leads it as a

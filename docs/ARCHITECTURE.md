@@ -30,6 +30,10 @@ exercises them without real agents.
   local Ollama model. **`src/signin.js`** knows how to install and sign in to each agent.
 - **`src/orchestrator.js`**: the brain decides each message and calls agents as tools
   (`ask_claude`, `start_mission`, `remember`, …).
+- **`src/tree.js`**: the agent tree: the `dispatch` tool, planning the brain's parts into
+  twigs (limb, model per tier, hand-over when a limb cannot run), the scheduler (per-limb
+  limits, writers alone after readers) and the report the brain reads back. The cockpit's
+  `runDispatch` runs each twig as a fresh headless turn or one chat call.
 - **`src/router.js`**: rules first (private data, sealed projects, pipelines, council,
   design, self-change), then a small model for ties. `cloudBlock` is the one check every
   cloud-bound text passes.

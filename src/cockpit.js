@@ -21,7 +21,8 @@ import { orchestrate, rememberExchange } from './orchestrator.js';
 import { brainMenu } from './brainmenu.js';
 import { createMemory, summaryPrompt } from './memory.js';
 import { runInteractive } from './signin.js';
-import { CLOUD_MODELS, brainStatus, chat, keyHint, loadKey, openBrowser, resolveBrain, saveKey, signInOpenRouter, warmBrain } from './brain.js';
+import { CLOUD_MODELS, DEFAULT_CLOUD_MODEL, DEFAULT_LOCAL_MODEL, brainStatus, chat, keyHint, loadKey, openBrowser, resolveBrain, saveKey, signInOpenRouter, warmBrain } from './brain.js';
+import { DEFAULT_TREE, LIMB_KINDS, planTwigs, runTwigs, treeLines, treeReport, twigPrompt, oneLine as clipLine } from './tree.js';
 import { createTelegram } from './telegram.js';
 import {
   LESSONS_PATH, defaultMissionDir, lessonsSchema, missionMarkdown, missionStateStore, parseLessons, partPrompt, pickHeadroom, recentLessons, runMission, slugify,
@@ -171,6 +172,7 @@ const HELP = [
   ['/telegram on|off|test', 'phone check-ins for missions (set up with `friday telegram`)'],
   ['/mission log [n]', "the last lines of a background mission's log"],
   ['/mission answer <n> <reply>', 'answer a background mission that is waiting (go, cancel, or what to change)'],
+  ['/tree [on|off]', 'the agent tree: FRIDAY (the brain) at the root, a limb per provider, and how many subagents each runs at once with which models (profile.json "tree")'],
   ['/orchestrate [on|off]', 'the brain decides each message and calls the agents as tools (on by default)'],
   ['/brain', 'a menu: the model behind FRIDAY in the cloud (OpenRouter, fast) or on this machine (Ollama), which model, sign in or out · typed: /brain cloud|local|auto, /brain model <id>'],
   ['/login', 'sign in to OpenRouter in your browser (the cloud brain)'],
@@ -1377,6 +1379,24 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
             + dim('\n  /mission log <n> · /mission answer <n> <go|cancel|…>\n'));
           return;
         }
+        case 'tree': {
+          const t = profile().tree || DEFAULT_TREE;
+          if (arg === 'on' || arg === 'off') {
+            profiles.save({ ...profile(), tree: { ...t, enabled: arg === 'on' } });
+            out(dim(`  agent tree ${arg} · saved to profile.json${arg === 'off' ? ' · the brain calls one agent at a time' : ''}\n`));
+            return;
+          }
+          const live = treeLimbs({ all: true });
+          const why = (l) => (live.includes(l) ? 'ready'
+            : l === 'openrouter' ? 'not signed in (/login)'
+              : l === 'ollama' ? (ollamaRunning ? 'no model set' : 'not running')
+                : installed.includes(l) ? ready.why(l) : 'not installed');
+          const status = Object.fromEntries(Object.keys(LIMB_KINDS).map((l) => [l, why(l)]));
+          const root = resolveBrain(profile(), CONFIG_DIR).label;
+          out('\n' + treeLines({ tree: t, root, status }).map((l, i) => `  ${i ? dim(l) : `${paint(CYAN, '◈')} ${bold(l)}`}`).join('\n') + '\n');
+          out(dim(`  ${profile().orchestrator.enabled === false ? 'the orchestrator is off (/orchestrate on), so nothing dispatches · ' : ''}/tree on|off · limits and models: profile.json "tree" · the root is the brain (/brain)\n`));
+          return;
+        }
         case 'orchestrate': {
           const o = profile().orchestrator;
           if (arg === 'on' || arg === 'off') {
@@ -1748,6 +1768,96 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
   // Runs the message through the brain (OpenRouter or a local model, src/brain.js),
   // which calls agents as tools. Returns false (the rules route it instead) when the
   // brain cannot be used right now.
+  // ---- the agent tree (src/tree.js) -----------------------------------------
+  // Limbs that can run a twig now. A sealed folder rules out every cloud limb.
+  function treeLimbs({ all = false } = {}) {
+    const t = profile().tree || DEFAULT_TREE;
+    if (!all && t.enabled === false) return [];
+    return Object.keys(LIMB_KINDS).filter((l) => {
+      if (!t.limbs?.[l] || (t.limbs[l].max ?? 1) < 1) return false;
+      if (l === 'openrouter') return !!loadKey(CONFIG_DIR, 'openrouter') && !sealedBlock(l, '');
+      if (l === 'ollama') return ollamaRunning && !!(t.limbs.ollama.models?.small || t.limbs.ollama.models?.large || config.ollamaModel);
+      return installed.includes(l) && ready(l) && !sealedBlock(l, '');
+    });
+  }
+
+  const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯';
+  const twigName = (t) => `${CIRCLED[t.n - 1] || `#${t.n}`} ${t.limb}${t.model ? ` · ${t.model}` : ''}`;
+
+  // One twig: a fresh headless turn (no shared session) or one chat call.
+  async function runTwig(t, { total, request, tree }) {
+    const prompt = twigPrompt(t, { total, request });
+    const blocked = sealedBlock(t.limb, `${request}\n${t.task}`);
+    if (blocked) return { ok: false, text: '', errors: [blocked] };
+    if (LIMB_KINDS[t.limb].kind === 'chat') {
+      const b = t.limb === 'ollama'
+        ? { provider: 'ollama', model: t.model || config.ollamaModel || DEFAULT_LOCAL_MODEL }
+        : { provider: 'openrouter', model: t.model || DEFAULT_CLOUD_MODEL, key: loadKey(CONFIG_DIR, 'openrouter'), cloud: true };
+      const r = await chat(b, {
+        messages: [{ role: 'system', content: 'You are a FRIDAY subagent. You have no tools, files or web: answer the part you are given from what it says, completely.' }, { role: 'user', content: prompt }],
+        temperature: 0.3, timeoutMs: tree.twigTimeoutMs || 600000,
+      });
+      return r.ok ? { ok: !!r.message?.content, text: r.message?.content || '', ms: r.ms, errors: r.message?.content ? [] : ['empty answer'] } : { ok: false, text: '', ms: r.ms, errors: [r.reason] };
+    }
+    // Readers run read-only; a writer gets the cockpit's mode (plan stays plan).
+    const mode = t.writes ? st.mode : 'plan';
+    const opts = runOpts(t.limb, st.cwd, { mode, args: t.model ? LIMB_KINDS[t.limb].modelArgs(t.model) : [] });
+    const run = runTurn(t.limb, prompt, { cwd: st.cwd, session: {}, ...opts, on: {}, timeoutMs: tree.twigTimeoutMs || 0 });
+    st.running.add(run);
+    const r = await run.done;
+    st.running.delete(run);
+    account(t.limb, r);
+    if (t.writes) rescanSoon();
+    return r;
+  }
+
+  // The brain's dispatch: plan the twigs, run them, report back. st.lastTree keeps the
+  // parts for when the brain writes no combined answer.
+  async function runDispatch(tasks, request) {
+    const tree = profile().tree || DEFAULT_TREE;
+    const { twigs, notes } = planTwigs(tasks, { tree, ready: treeLimbs() });
+    if (!twigs.length) return { ok: false, report: `error: no part could run${notes.length ? ` (${notes.join('; ')})` : ''}. Call an agent directly instead.` };
+    const wide = Math.max(...twigs.map((t) => twigName(t).length));
+    out(`\n${paint(CYAN, '◈')} ${bold('FRIDAY')} ${dim(`→ ${twigs.length} subagent${twigs.length > 1 ? 's' : ''}`)}\n`);
+    twigs.forEach((t, i) => out(`  ${dim(i === twigs.length - 1 ? '└─' : '├─')} ${paint(AGENTS[t.limb]?.color || CYAN, twigName(t).padEnd(wide))}  ${dim(clipLine(t.task, Math.max(20, (process.stdout.columns || 100) - wide - 10)))}${t.writes ? paint(AMBER, ' ✎') : ''}\n`));
+    for (const n of notes) out(dim(`  ⎿  ${n}\n`));
+    hud.set({ route: `friday → ${twigs.length} subagents` });
+    for (const l of new Set(twigs.map((t) => t.limb))) if (AGENTS[l]) setAgent(l, { status: 'working', since: Date.now() });
+    let stopped = false;
+    const results = await runTwigs(twigs, {
+      tree,
+      runTwig: (t) => runTwig(t, { total: twigs.length, request, tree }),
+      shouldStop: () => stopped,
+      on: {
+        end(t, r) {
+          if (r.aborted) stopped = true;
+          const bits = [r.ms != null ? fmtMs(r.ms) : '', r.cost ? `$${r.cost.toFixed(3)}` : ''].filter(Boolean).join(' · ');
+          out(`  ${r.ok ? paint(GREEN, '✓') : paint(RED, '✗')} ${twigName(t)}${bits ? dim(` · ${bits}`) : ''}${r.ok ? '' : dim(` · ${(r.errors || []).join('; ').slice(0, 120) || (r.aborted ? 'interrupted' : 'failed')}`)}\n`);
+          hud.feed({ kind: 'agent', agent: t.limb, text: `[subagent ${t.n}] ${(r.text || '').trim().slice(0, 400)}` });
+        },
+      },
+    });
+    for (const l of new Set(twigs.map((t) => t.limb))) if (AGENTS[l]) setAgent(l, { status: 'idle', since: Date.now() });
+    st.lastTree = { twigs, results };
+    const ok = results.some((r) => r?.ok);
+    const done = results.filter((r) => r?.ok).length;
+    out(dim(`  ${done}/${twigs.length} done${stopped ? ' · interrupted' : ''}\n`));
+    if (stopped) return { ok, report: `${treeReport(twigs, results, { resultChars: tree.resultChars, notes })}\nThe user interrupted: stop here and say so in one sentence.` };
+    return { ok, report: treeReport(twigs, results, { resultChars: tree.resultChars, notes }) };
+  }
+
+  // No combined answer came: show each part's answer.
+  function showTreeParts() {
+    const lt = st.lastTree;
+    if (!lt) return;
+    for (const t of lt.twigs) {
+      const r = lt.results[t.n - 1];
+      if (!r?.ok || !r.text?.trim()) continue;
+      const s = createStream('  ', { first: `${paint(AGENTS[t.limb]?.color || CYAN, '●')} ` });
+      out(`\n${bold(twigName(t))}\n` + s.write(r.text.trim()) + s.flush());
+    }
+  }
+
   async function runOrchestrator(text, p = {}) {
     const prof = profile();
     const o = prof.orchestrator;
@@ -1768,6 +1878,7 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
     let sp = null;
     let localMs = 0;
     let asked = null; // the task the brain wrote for the next agent
+    let dispatched = false; // the brain used the agent tree for this message
     const routed = () => `routed by ${short} in ${fmtMs(localMs)}`;
     // FRIDAY's own words, as a "● " block like any answer.
     const fridaySays = (t) => {
@@ -1775,7 +1886,7 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
       out('\n' + s.write(t) + s.flush());
     };
     const res = await orchestrate(text, {
-      agents, profile: prof, brain, history: st.orchHistory, defaultAgent: p.steps?.[0]?.agent, missions: true,
+      agents, profile: prof, brain, history: st.orchHistory, defaultAgent: p.steps?.[0]?.agent, missions: true, limbs: treeLimbs(),
       context: { cwd: tilde(st.cwd), focus: st.focus?.display || null, mode: st.mode, memory: recall() },
       callAgent: async (agent, prompt) => {
         st.agent = agent; hud.set({ active: agent });
@@ -1786,6 +1897,8 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
         thinking() { sp = spinner('routing'); },
         decide(ms) { sp?.stop(); sp = null; localMs += ms; },
         delegate(agent, task) { asked = task; },
+        dispatch: (tasks) => { dispatched = true; return runDispatch(tasks, text); },
+        unsummarized: showTreeParts,
         remember(fact) {
           const ok = rememberFact(fact);
           if (ok) out(`  ${dim('⎿')}  ${dim(`remembered: ${fact}`)}\n`);
@@ -1796,7 +1909,8 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
           out(dim(`\n  FRIDAY · ${short} · ${fmtMs(localMs)}\n`));
           record('friday', text, t);
         },
-        note(t) { fridaySays(t); },
+        // After a dispatch this is the combined answer: nobody else recorded it.
+        note(t) { fridaySays(t); if (dispatched) record('friday', text, t); },
         fail(reason) { out(dim(`  ⎿  FRIDAY stopped: ${reason}\n`)); },
         fallback(from, to) { out(dim(`  ⎿  handing it to ${to} (${from === 'the local model' ? 'it needs files or tools' : `${from} failed`})\n`)); },
       },

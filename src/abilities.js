@@ -4,6 +4,7 @@
 export const ABILITIES = [
   { name: 'Just ask', what: 'the brain sends it to the right AI', try: 'why do the tests fail?', needs: { agents: 1 } },
   { name: 'Missions', what: 'research → build → test → fix, you approve', try: '/mission build a CLI that …', needs: { agents: 1, brain: true } },
+  { name: 'Agent tree', what: 'many subagents at once, any AI, any model', try: 'use five sonnets to review src/', needs: { agents: 1, brain: true } },
   { name: 'Council', what: 'every AI answers; /relay gets a check', try: '/all which database fits?', needs: { agents: 2 } },
   { name: 'Projects', what: 'agents move there; the HUD maps the repo', try: "how's my-app going", needs: {} },
   { name: 'Second brain', what: 'every AI works from your vault', try: 'what did I decide on pricing?', needs: { vault: true } },

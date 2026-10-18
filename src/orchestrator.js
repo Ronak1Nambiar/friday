@@ -8,6 +8,7 @@
 
 import { chat } from './brain.js';
 import { REMEMBER_TOOL } from './memory.js';
+import { dispatchTool } from './tree.js';
 import { cap, userName, userPossessive } from './user.js';
 
 // A mission: FRIDAY leads a multi-phase job itself (src/mission.js).
@@ -20,9 +21,11 @@ export const MISSION_TOOL = {
   },
 };
 
-// One tool per ready cloud agent, described by its strengths from the profile.
-export function agentTools(agents, profile, { missions = false, remember = false } = {}) {
-  return [...(missions ? [MISSION_TOOL] : []), ...(remember ? [REMEMBER_TOOL] : []), ...agentList(agents, profile)];
+// One tool per ready cloud agent, described by its strengths from the profile, and
+// `dispatch` (the agent tree, src/tree.js) when any limb can run.
+export function agentTools(agents, profile, { missions = false, remember = false, limbs = [] } = {}) {
+  return [...(missions ? [MISSION_TOOL] : []), ...(remember ? [REMEMBER_TOOL] : []), ...agentList(agents, profile),
+    ...(limbs.length ? [dispatchTool(limbs, profile.tree)] : [])];
 }
 function agentList(agents, profile) {
   return agents.map((id) => ({
@@ -41,10 +44,11 @@ function agentList(agents, profile) {
   }));
 }
 
-export function systemPrompt({ agents, focus, cwd, mode, missions = false, memory = '' }) {
+export function systemPrompt({ agents, focus, cwd, mode, missions = false, memory = '', limbs = [] }) {
   return [
     `You are FRIDAY, ${userPossessive()} orchestrator. You decide; the agents do the work.`,
     `Agents you can call as tools: ${agents.join(', ')}. Pick by their descriptions.`,
+    ...(limbs.length ? [`You are the root of an agent tree: dispatch runs many subagents at once on ${limbs.join(', ')}, each with its own model, and gives you all their answers. Use it when the work splits into independent parts, or when ${userName()} asks for several agents or models at once (e.g. "five sonnets", "have every agent check this"); give each part everything it needs. Simple parts get tier small, hard ones tier large. One agent call is still right for a single task. After a dispatch you write the combined answer yourself: ${userName()} has not seen the parts.`] : []),
     'Delegate anything that needs reading or changing files, running code or tests, debugging, reviewing, web research, or writing more than a few sentences.',
     'Answer directly, without tools, only for greetings, thanks, or a quick fact you are sure of. Never pretend to have read files.',
     // Claude's process stays up between turns (~1-3 s an answer); the others start cold (codex ~12 s).
@@ -67,6 +71,11 @@ export function parseCall(call) {
   if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = { task: args }; } }
   if (name === 'start_mission') return { name, agent: null, mission: true, task: String(args?.goal ?? args?.task ?? '').trim() };
   if (name === 'remember') return { name, agent: null, remember: true, task: String(args?.fact ?? args?.task ?? '').trim() };
+  if (name === 'dispatch') {
+    let tasks = args?.tasks;
+    if (typeof tasks === 'string') { try { tasks = JSON.parse(tasks); } catch { tasks = []; } }
+    return { name, agent: null, dispatch: true, tasks: Array.isArray(tasks) ? tasks : [], task: '' };
+  }
   const m = /^ask_(\w+)$/.exec(name);
   return { name, agent: m ? m[1] : null, task: String(args?.task ?? '').trim() };
 }
@@ -114,12 +123,13 @@ export async function step({ brain, model, messages, tools, timeoutMs = 10000, k
 // remember(fact) -> bool (offers the brain a remember tool; context.memory is its memory).
 // Returns { handled, calls: [{ agent, ok }], final } ; handled=false means fall back
 // to the rules (the model could not be reached before anything happened).
-export async function orchestrate(text, { agents, profile, brain, history = [], context, callAgent, on = {}, fetchImpl, base, defaultAgent = 'claude', missions = false }) {
+export async function orchestrate(text, { agents, profile, brain, history = [], context, callAgent, on = {}, fetchImpl, base, defaultAgent = 'claude', missions = false, limbs = [] }) {
   const o = profile.orchestrator;
   let avail = [...agents]; // an agent that fails is dropped for the rest of this message
   const remember = !!on.remember;
-  let tools = agentTools(avail, profile, { missions, remember });
-  const messages = [{ role: 'system', content: systemPrompt({ agents, missions, ...context }) }, ...history, { role: 'user', content: text }];
+  if (!on.dispatch) limbs = [];
+  let tools = agentTools(avail, profile, { missions, remember, limbs });
+  const messages = [{ role: 'system', content: systemPrompt({ agents, missions, limbs, ...context }) }, ...history, { role: 'user', content: text }];
   const calls = [];
   const seen = new Set();
   let final = '';
@@ -173,7 +183,19 @@ export async function orchestrate(text, { agents, profile, brain, history = [], 
     for (const c of wanted) {
       let content;
       const key = `${c.agent}\0${c.task}`;
-      if (c.remember && remember) content = c.task && on.remember(c.task) ? 'saved to memory. Now tell the user, in a few words.' : 'error: not saved (empty, or it is private).';
+      if (c.dispatch) {
+        const key = `dispatch\0${JSON.stringify(c.tasks)}`;
+        if (!limbs.length) content = `error: no tool dispatch. Available: ${avail.map((a) => `ask_${a}`).join(', ') || 'none'}`;
+        else if (!c.tasks.length) content = 'error: dispatch needs tasks: [{limb, tier, task, writes}].';
+        else if (seen.has(key)) content = 'error: you already dispatched exactly this. Write the answer or do something else.';
+        else {
+          seen.add(key);
+          const r = await on.dispatch(c.tasks);
+          calls.push({ agent: 'tree', ok: !!r?.ok, dispatch: true });
+          lastText = '';
+          content = r?.report || 'error: the subagents did not run.';
+        }
+      } else if (c.remember && remember) content = c.task && on.remember(c.task) ? 'saved to memory. Now tell the user, in a few words.' : 'error: not saved (empty, or it is private).';
       else if (!c.agent || !avail.includes(c.agent)) content = `error: no tool ${c.name}. Available: ${avail.map((a) => `ask_${a}`).join(', ') || 'none'}`;
       else if (seen.has(key)) content = 'error: you already asked this agent exactly this. Do something else or finish.';
       else {
@@ -187,7 +209,7 @@ export async function orchestrate(text, { agents, profile, brain, history = [], 
         else {
           // Take the agent out and point the model at the next one, with the same task.
           avail = avail.filter((a) => a !== c.agent);
-          tools = agentTools(avail, profile, { missions: missions && !calls.length, remember });
+          tools = agentTools(avail, profile, { missions: missions && !calls.length, remember, limbs });
           const why = !res ? 'NOT RUN: blocked or unavailable' : `FAILED: ${(res.errors || []).join('; ').slice(0, 300) || 'error'}`;
           content = `${why}. Nothing was done; do not say it succeeded. ${c.agent} is unavailable now.`
             + (avail.length ? ` Call ask_${avail[0]} with the same task now.` : ' No other agent is available: tell the user in one sentence.');
@@ -196,11 +218,13 @@ export async function orchestrate(text, { agents, profile, brain, history = [], 
       messages.push({ role: 'tool', tool_name: c.name, content });
     }
     // The answer is in and nothing more was asked for: done, without another model call.
-    if (!o.alwaysFollowUp && calls.at(-1)?.ok && !wantsFollowUp(text)) {
+    if (!o.alwaysFollowUp && calls.at(-1)?.ok && !calls.at(-1).dispatch && !wantsFollowUp(text)) {
       messages.push({ role: 'assistant', content: '' });
       break;
     }
   }
+  // The parts came back but no combined answer (none written, or out of steps): show the parts.
+  if (!final && calls.at(-1)?.dispatch) on.unsummarized?.();
   // This exchange as real messages (tool results cut short) for the next message's memory.
   const transcript = messages.slice(1 + history.length).filter((x) => x !== nudge).map((x) => (x.role === 'tool' ? { ...x, content: x.content.slice(0, 600) } : x));
   if (transcript.at(-1)?.role === 'assistant' && !transcript.at(-1).tool_calls) transcript.at(-1).content = final;

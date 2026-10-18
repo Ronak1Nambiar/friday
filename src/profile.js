@@ -4,6 +4,7 @@
 // @agent overrides) take effect on the next message.
 import fs from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_TREE } from './tree.js';
 
 // Strengths, from each CLI's help and docs:
 // - Claude Code 2.1: multi-file edits, plan mode, skills/hooks; loads the user's vault
@@ -138,6 +139,9 @@ export const DEFAULT_PROFILE = {
         notes: 'opencode on a free model; keep it simple and literal' },
     },
   },
+  // The agent tree (src/tree.js): FRIDAY's brain sends parts of a job to many subagents
+  // at once. Per limb: max at once, and the model for small and large parts.
+  tree: DEFAULT_TREE,
   learned: [],
 };
 

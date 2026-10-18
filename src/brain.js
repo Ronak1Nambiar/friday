@@ -192,8 +192,13 @@ export function cliPrompt(messages, tools, format) {
   }
   const only = 'Do not use any tools of your own, run commands or read files: you only decide.';
   if (tools?.length) {
-    parts.push('[Tools you can call]\n' + tools.map((t) => `- ${t.function.name}(${Object.keys(t.function.parameters?.properties || {}).join(', ')}): ${t.function.description}`).join('\n'));
-    parts.push(`${only} Reply with ONLY one JSON object, nothing before or after it:\n{"tool": "<tool name>", "args": {"task": "..."}} to call a tool, or {"answer": "<your reply to the user>"} to answer yourself.`);
+    // A tool that takes more than a task (dispatch's list of parts) shows its schema.
+    const shape = (t) => {
+      const keys = Object.keys(t.function.parameters?.properties || {});
+      return keys.length === 1 && ['task', 'goal', 'fact'].includes(keys[0]) ? '' : `\n  args schema: ${JSON.stringify(t.function.parameters)}`;
+    };
+    parts.push('[Tools you can call]\n' + tools.map((t) => `- ${t.function.name}(${Object.keys(t.function.parameters?.properties || {}).join(', ')}): ${t.function.description}${shape(t)}`).join('\n'));
+    parts.push(`${only} Reply with ONLY one JSON object, nothing before or after it:\n{"tool": "<tool name>", "args": {"task": "..."}} to call a tool${tools.some((t) => t.function.name === 'dispatch') ? ' (args as that tool takes them, e.g. {"tool": "dispatch", "args": {"tasks": [{"limb": "...", "tier": "small", "task": "..."}]}})' : ''}, or {"answer": "<your reply to the user>"} to answer yourself.`);
   } else if (format) {
     parts.push(`${only} Reply with ONLY one JSON object that matches this JSON schema, nothing before or after it:\n${JSON.stringify(format)}`);
   } else parts.push(`${only} Reply with the answer only.`);
