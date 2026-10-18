@@ -121,9 +121,11 @@ Run /design-sync to create one from this repo's real components and tokens, and 
 }
 
 // The interactive Claude Code command for a pane. The prompt goes first because
-// --disallowedTools takes a list.
-export function paneCommand({ prompt, repoDir, handoffDir, blockRepoWrites = true }) {
-  const args = ['claude', prompt];
+// --disallowedTools takes a list. `session` names the conversation; `resume` reopens it.
+export function paneCommand({ prompt, repoDir, handoffDir, blockRepoWrites = true, session, resume = false }) {
+  const args = ['claude'];
+  if (prompt && !resume) args.push(prompt);
+  if (session) args.push(resume ? '--resume' : '--session-id', session);
   if (handoffDir) args.push('--add-dir', handoffDir);
   if (blockRepoWrites && repoDir) args.push('--disallowedTools', 'NotebookEdit', `Edit(${denyGlob(repoDir)})`, `Write(${denyGlob(repoDir)})`);
   return args;

@@ -1,5 +1,6 @@
 // The terminal cockpit: one prompt in front of every agent.
 import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -415,6 +416,7 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
   const routing = () => st.auto && profile().routing !== 'manual';
   // Print something while the prompt may be showing, then put the prompt back.
   function notify(line) {
+    if (st.handedOver) { st.handedOver.push(line); return; }
     if (st.busy || quitting || picker) { out(line + '\n'); return; }
     clearPromptLine();
     out(line + '\n');
@@ -426,7 +428,8 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
     showPrompt();
   }
   function showPrompt() {
-    if (quitting || picker) return;
+    // rl.prompt() resumes stdin, which would take keys from the program running here.
+    if (quitting || picker || st.handedOver) return;
     const a = routing() ? paint(CYAN, 'auto') : st.agent ? paint(AGENTS[st.agent].color, st.agent) : dim('none');
     const f = st.focus ? ' ' + paint(AMBER, st.focus.display) : '';
     const m = st.mode === 'edit' ? '' : ' ' + (st.mode === 'yolo' ? paint(RED, '⏵⏵ bypass') : dim('⏸ plan'));
@@ -1710,15 +1713,22 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
 
   // A login, install or download that needs the terminal (claude auth login, ollama pull):
   // FRIDAY stops reading keys until it exits.
-  async function handOverTerminal(bin, args) {
+  async function handOverTerminal(bin, args, { cwd, label } = {}) {
     const raw = process.stdin.isRaw;
     rl.pause();
     try { if (tty) process.stdin.setRawMode(false); } catch {}
-    out(dim(`  ── ${bin} ${args.join(' ')} ──\n`));
-    const ok = await runInteractive(bin, args);
-    try { if (tty) process.stdin.setRawMode(raw); } catch {}
-    rl.resume();
-    out(dim(`  ── back in FRIDAY ──\n`));
+    out(dim(`  ── ${label || `${bin} ${args.join(' ')}`} ──\n`));
+    // Notices that arrive meanwhile would draw over the other program's screen.
+    st.handedOver = [];
+    let ok = false;
+    try { ok = await runInteractive(bin, args, { cwd }); } finally {
+      try { if (tty) process.stdin.setRawMode(raw); } catch {}
+      rl.resume();
+      const held = st.handedOver;
+      st.handedOver = null;
+      out(dim(`  ── back in FRIDAY ──\n`));
+      for (const l of held) out(l + '\n');
+    }
     return ok;
   }
 
@@ -2368,43 +2378,68 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
       out(dim('  setup  create it first (opens a Claude Code pane) · skip  design without it · or paste its claude.ai/design link\n'));
       return;
     } else if (linked) out(dim(`  using Claude Design project ${linked.project} for ${st.design.app.display} (saved to profile.json designSystems)\n`));
-    openDesignPane();
+    return openDesignPane();
   }
 
-  // An interactive Claude Code pane beside the cockpit, or (openPanes: false, or no
-  // terminal found) the command to run by hand.
-  function pane(cmd, cwd, what) {
+  // Interactive Claude Code (headless claude -p has no Artifact tool) right here:
+  // FRIDAY hands this terminal over and gets it back on /exit. "designPane": "window"
+  // in config.json opens it beside the cockpit instead; with no terminal, the command
+  // to run by hand. Returns 'inline', the terminal used, or null.
+  async function pane(cmd, cwd, what) {
+    if (tty && config.designPane !== 'window') {
+      out(`  ${paint(CYAN, '◈')} ${what}: Claude Code takes over this terminal · /exit comes back to FRIDAY\n`);
+      await handOverTerminal(cmd[0], cmd.slice(1), { cwd, label: `Claude Code · ${what}` });
+      return 'inline';
+    }
     const how = config.openPanes === false ? null : openTerminal(cmd, { cwd });
     if (how) out(`  ${paint(CYAN, '◈')} ${what} in an interactive Claude Code pane (${how})\n`);
     else out(paint(AMBER, `  ${what}: run this in another terminal\n`) + dim(`  cd ${shq(cwd)} && ${cmd.map(shq).join(' ')}\n`));
     return how;
   }
 
-  function openDesignPane() {
+  function showHandoff(h) {
     const d = st.design;
-    const cmd = paneCommand({ prompt: designPrompt({ request: d.request, app: d.app, ds: d.ds, handoff: d.handoff }), repoDir: d.app.dir, handoffDir: path.dirname(d.handoff) });
-    out(dim(`  ◈ design system: ${d.ds ? `${d.ds.name} (${d.ds.project})` : 'none'} · headless claude -p has no Claude Design access, so the design step is interactive\n`));
-    pane(cmd, d.app.dir || os.homedir(), 'Claude Design');
-    out(dim(`  the link appears here when the design is published (handoff ${tilde(d.handoff)}) · iterate in that pane · /approve when it is right · no code changes until then\n`));
-    d.phase = 'design';
-    d.watch?.stop();
-    d.watch = watchHandoff(d.handoff, (h) => {
-      d.link = h.link; d.spec = h.spec; d.revision = h.revision;
-      notify(`  ${paint(CYAN, '◈')} ${bold('design')}${h.revision ? dim(` r${h.revision}`) : ''}: ${h.link || '(no link yet)'}\n${dim('  /approve to implement · or keep iterating in the pane')}`);
-    });
+    d.link = h.link; d.spec = h.spec; d.revision = h.revision;
+    notify(`  ${paint(CYAN, '◈')} ${bold('design')}${h.revision ? dim(` r${h.revision}`) : ''}: ${h.link || '(no link yet)'}\n${dim('  /approve to implement · /design open to keep iterating')}`);
   }
 
-  function designCommand(arg) {
+  async function openDesignPane() {
+    const d = st.design;
+    // One Claude conversation per design: the first open starts it, later opens resume it.
+    const resume = d.session && d.opened;
+    d.session ||= randomUUID();
+    const cmd = paneCommand({
+      prompt: resume ? null : designPrompt({ request: d.request, app: d.app, ds: d.ds, handoff: d.handoff }),
+      repoDir: d.app.dir, handoffDir: path.dirname(d.handoff), session: d.session, resume,
+    });
+    out(dim(`  ◈ design system: ${d.ds ? `${d.ds.name} (${d.ds.project})` : 'none'} · no code changes until /approve\n`));
+    d.phase = 'design';
+    d.watch?.stop();
+    d.opened = true;
+    const how = await pane(cmd, d.app.dir || os.homedir(), 'Claude Design');
+    if (how === 'inline') {
+      const h = readHandoff(d.handoff);
+      if (h?.link) showHandoff(h);
+      else out(paint(AMBER, `  no design link was written yet${d.link ? `; still using ${d.link}` : ''} · /design open to go back in\n`));
+      return;
+    }
+    out(dim(`  the link appears here when the design is published (handoff ${tilde(d.handoff)}) · iterate in that pane · /approve when it is right\n`));
+    d.watch = watchHandoff(d.handoff, showHandoff);
+  }
+
+  async function designCommand(arg) {
     const d = st.design;
     if (!d) { out(dim('  no design in progress. Ask for one: "redesign the <app> ..."\n')); return; }
     if (arg === 'cancel') { d.watch?.stop(); st.design = null; out(dim('  design cancelled\n')); return; }
-    if (arg === 'skip') { openDesignPane(); return; }
-    if (arg === 'open') { openDesignPane(); return; }
+    if (arg === 'skip' || arg === 'open') return openDesignPane();
     if (arg === 'setup') {
-      pane(paneCommand({ prompt: createDsPrompt({ app: d.app }), blockRepoWrites: false }), d.app.dir || os.homedir(), 'creating the design system');
-      out(dim('  when it finishes: /design open\n'));
       d.phase = 'ds-setup';
-      return;
+      const how = await pane(paneCommand({ prompt: createDsPrompt({ app: d.app }), blockRepoWrites: false }), d.app.dir || os.homedir(), 'creating the design system');
+      if (how !== 'inline') { out(dim('  when it finishes: /design open\n')); return; }
+      d.ds = findDesignSystem(d.app, profile()) || d.ds;
+      if (!d.ds) { out(paint(AMBER, '  no design system was recorded (.design-sync/NOTES.md) · /design setup to retry · /design skip to design without one\n')); return; }
+      out(dim(`  design system ready: ${d.ds.name}\n`));
+      return openDesignPane();
     }
     if (d.phase === 'ds-setup' || d.phase === 'needs-ds') d.ds = findDesignSystem(d.app, profile()) || d.ds;
     out(`  ${bold(d.app.display)} ${dim(`· ${d.phase}${d.ds ? ` · ${d.ds.name}` : ' · no design system'}`)}\n`);
@@ -2459,7 +2494,7 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
     d.phase = 'resync';
     d.branch = wt.branch;
     if (d.ds) {
-      pane(paneCommand({ prompt: resyncPrompt({ app: d.app, ds: d.ds, branch: wt.branch }), blockRepoWrites: false }), wt.dir, 're-syncing the design system (takes a while)');
+      await pane(paneCommand({ prompt: resyncPrompt({ app: d.app, ds: d.ds, branch: wt.branch }), blockRepoWrites: false }), wt.dir, 're-syncing the design system (takes a while)');
     }
     out(dim(`  design implemented on ${wt.branch} (not merged). Merge when happy: git -C ${tilde(d.app.dir)} merge ${wt.branch}\n`));
     if (vaultQueue) applyVault([{ op: 'log', kind: 'design', title: `${d.app.display} redesign implemented`, body: `"${d.request}". Design ${h.link || '(no link)'}; ${impl} implemented on \`${wt.branch}\`${rev ? `, ${rev} reviewed` : ''}; design-system re-sync ${d.ds ? 'started' : 'skipped (no design system)'}.` }], { source: 'design' });

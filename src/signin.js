@@ -45,10 +45,10 @@ export function run(bin, args, timeoutMs = 15000) {
 }
 
 // A login (or install) that needs the terminal: it shares this one until it exits.
-export function runInteractive(bin, args) {
+export function runInteractive(bin, args, { cwd } = {}) {
   const c = process.platform === 'win32' ? winCommand(bin, args) : { file: bin, args, shell: false };
   return new Promise((resolve) => {
-    const child = spawn(c.file, c.args, { shell: c.shell, stdio: 'inherit' });
+    const child = spawn(c.file, c.args, { shell: c.shell, stdio: 'inherit', ...(cwd ? { cwd } : {}) });
     child.on('exit', (code) => resolve(code === 0));
     child.on('error', () => resolve(false));
   });
