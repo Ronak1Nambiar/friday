@@ -163,6 +163,30 @@ test('a failed agent is dropped and the task goes to the next one, even if the m
   assert.deepEqual(all.ran.map((x) => x.agent), ['codex', 'claude', 'gemini']);
 });
 
+test('an agent that stops partway (a usage limit) is finished by the next one, not redone', async () => {
+  // The model gives up: FRIDAY's own hand-over carries what was done.
+  const m = model([{ tool_calls: [call('ask_claude', 'implement the queue and write docs')] }, { content: '' }, { content: '' }]);
+  const a = agentsDo({ claude: { ok: false, text: 'Build passes. Tests 113/113. Now docs. Checking the relevant sections.' } });
+  const failing = async (agent, prompt) => { const r = await a.callAgent(agent, prompt); return agent === 'claude' ? { ...r, errors: ["You've hit your session limit"] } : r; };
+  const r = await orchestrate('implement the queue and write docs', { agents, profile, context, callAgent: failing, fetchImpl: m.fetchImpl, base: 'http://x' });
+  assert.deepEqual(a.ran.map((x) => x.agent), ['claude', 'codex']);
+  assert.match(a.ran[1].prompt, /^implement the queue and write docs\n\nclaude already started this and stopped partway \(You've hit your session limit\)/);
+  assert.match(a.ran[1].prompt, /Now docs\. Checking the relevant sections\.[\s\S]*git status, git diff[\s\S]*only what is left/);
+  assert.match(m.seen[1].messages.at(-1).content, /stopped partway[\s\S]*Call ask_codex to finish it/);
+  assert.doesNotMatch(m.seen[1].messages.at(-1).content, /Nothing was done/);
+  assert.equal(r.calls[0].partial.endsWith('relevant sections.'), true);
+  // The model picks the next agent itself and repeats the original task: still a hand-over.
+  const m2 = model([{ tool_calls: [call('ask_claude', 'do x')] }, { tool_calls: [call('ask_gemini', 'do x')] }, { content: '' }]);
+  const b = agentsDo({ claude: { ok: false, text: 'did half of x' } });
+  await orchestrate('do x', { agents, profile, context, callAgent: b.callAgent, fetchImpl: m2.fetchImpl, base: 'http://x' });
+  assert.match(b.ran[1].prompt, /^do x\n\nclaude already started this and stopped partway\.[\s\S]*did half of x/);
+  // A failure before any work keeps the plain hand-over.
+  const m3 = model([{ tool_calls: [call('ask_claude', 'y')] }, { content: '' }, { content: '' }]);
+  const c3 = agentsDo({ claude: { ok: false, text: '' } });
+  await orchestrate('y', { agents, profile, context, callAgent: c3.callAgent, fetchImpl: m3.fetchImpl, base: 'http://x' });
+  assert.equal(c3.ran[1].prompt, c3.ran[0].prompt);
+});
+
 test('memory holds the real exchange: tool call, cut-short result, and the closing line', async () => {
   const m = model([{ tool_calls: [call('ask_claude', 'summarize render.js')] }, { content: '' }]);
   const r = await orchestrate('what does render.js do', { agents, profile, context, callAgent: agentsDo({ claude: { text: 'x'.repeat(3000) } }).callAgent, fetchImpl: m.fetchImpl, base: 'http://x' });

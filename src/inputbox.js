@@ -59,7 +59,8 @@ export function edit({ text, cursor }, s, key = {}) {
 // The live box. `queued()` lists what is waiting; `submit(text)` queues a message;
 // `interrupt()` stops the running work; `sigint()` is Ctrl+C.
 // `status()`: a short mode line for the hint (e.g. "⏵⏵ bypass permissions").
-export function createQueueBox({ write, size = () => ({ rows: process.stdout.rows || 24, cols: process.stdout.columns || 80 }), queued, submit, interrupt, sigint, takeLast, status = () => '' }) {
+// `asking()`: a question above is waiting for an answer (the hint says so).
+export function createQueueBox({ write, size = () => ({ rows: process.stdout.rows || 24, cols: process.stdout.columns || 80 }), queued, submit, interrupt, sigint, takeLast, status = () => '', asking = () => false }) {
   let open = false;
   let text = '';
   let cursor = 0;
@@ -67,7 +68,9 @@ export function createQueueBox({ write, size = () => ({ rows: process.stdout.row
   let rows = 0;
   let pendingEnter = null; // an Enter that may be part of a paste
   const hint = () => {
-    const base = text ? 'enter queue · esc clear' : `type to queue the next message · ${queued().length ? '↑ edit last queued · ' : ''}esc interrupt`;
+    const base = text ? 'enter queue · esc clear'
+      : asking() ? 'answer the question above (↑↓ enter, 1-9, esc) · or type to queue a message'
+        : `type to queue the next message · ${queued().length ? '↑ edit last queued · ' : ''}esc interrupt`;
     const s = status();
     return s ? `${s} (shift+tab) · ${base}` : base;
   };

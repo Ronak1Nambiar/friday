@@ -187,6 +187,8 @@ const HELP = [
 
 const SPIN = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
 const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim();
+// A key that types text (not a digit, which picks an option, nor space, a toggle).
+export const isTypedChar = (s, key = {}) => typeof s === 'string' && s.length === 1 && !key.ctrl && !key.meta && /^[^\x00-\x1f\x7f0-9 ]$/.test(s);
 const out = (s) => process.stdout.write(s);
 const LOGIN_ERROR = /refresh token (was )?revoked|log ?in again|sign in again|not logged in|please (log|sign) in|authentication (failed|required)|invalid api key/i;
 const tilde = (p) => (p && p.startsWith(os.homedir()) ? '~' + p.slice(os.homedir().length) : p);
@@ -454,7 +456,13 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
   let askChain = Promise.resolve();
   function choose(spec) {
     if (!tty) return Promise.resolve(null);
-    const p = askChain.then(() => asker.choose(spec));
+    const p = askChain.then(() => {
+      const answer = asker.choose(spec);
+      // An agent is waiting on this: the bell flags the terminal, the box says so.
+      if (st.busy) out('\x07');
+      box.refresh();
+      return answer;
+    }).then((r) => { box.refresh(); return r; });
     askChain = p.catch(() => {});
     return p;
   }
@@ -462,6 +470,7 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
   const box = createQueueBox({
     write: out,
     status: () => (st.mode === 'yolo' ? '⏵⏵ bypass permissions' : st.mode === 'plan' ? '⏸ plan mode' : ''),
+    asking: () => asker.open,
     queued: () => st.queue.map((q) => q.text),
     submit(text) {
       if (!sealedBlock('claude', text)) {
@@ -482,7 +491,13 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
     const passthrough = process.stdin.listeners('keypress');
     process.stdin.removeAllListeners('keypress');
     process.stdin.on('keypress', (s, key) => {
-      if (asker.open) return asker.key(s, key || {});
+      // A question while work runs (a permission, Claude's AskUserQuestion): navigation
+      // answers it; typing starts a queued message in the box, and Enter queues that
+      // message instead of picking an option nobody looked at.
+      if (asker.open) {
+        if (box.isOpen && !asker.typing && (box.text || isTypedChar(s, key))) return box.key(s, key || {});
+        return asker.key(s, key || {});
+      }
       if (picker) return picker.key(key || {});
       // Shift+Tab cycles the permission mode, as in Claude Code: edit -> plan -> bypass.
       if (key?.name === 'tab' && key.shift && !quitting) return cycleMode();

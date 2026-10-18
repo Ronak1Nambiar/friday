@@ -82,6 +82,8 @@ export function createAsker({ write, width = () => process.stdout.columns || 100
   };
   return {
     get open() { return !!cur; },
+    // An answer is being typed ("Other"): every key belongs to it.
+    get typing() { return cur?.typing != null; },
     choose(spec) {
       return new Promise((resolve) => {
         cur = { spec, resolve, sel: Math.min(spec.start || 0, spec.options.length - 1), child: null, picked: new Set(), typing: null };

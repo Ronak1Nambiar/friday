@@ -32,6 +32,29 @@ test('editing keys', () => {
   assert.equal(edit(s, '\x1b', { name: 'escape' }), null);
 });
 
+test('queue box: while a question waits, the hint says to answer it (or type to queue)', () => {
+  const written = [];
+  let asking = true;
+  const box = createQueueBox({ write: (s) => written.push(s), size: () => ({ rows: 30, cols: 120 }), queued: () => [], submit() {}, takeLast: () => null, interrupt() {}, sigint() {}, asking: () => asking });
+  box.open();
+  assert.match(written.join(''), /answer the question above \(↑↓ enter, 1-9, esc\) · or type to queue a message/);
+  asking = false;
+  written.length = 0;
+  box.refresh();
+  assert.match(written.join(''), /type to queue the next message/);
+});
+
+test('isTypedChar: letters and symbols type; digits, space, control keys do not', async () => {
+  const { isTypedChar } = await import('../src/cockpit.js');
+  assert.equal(isTypedChar('a', { name: 'a' }), true);
+  assert.equal(isTypedChar('@', {}), true);
+  assert.equal(isTypedChar('1', { name: '1' }), false);
+  assert.equal(isTypedChar(' ', { name: 'space' }), false);
+  assert.equal(isTypedChar('\r', { name: 'return' }), false);
+  assert.equal(isTypedChar('c', { name: 'c', ctrl: true }), false);
+  assert.equal(isTypedChar(undefined, { name: 'up' }), false);
+});
+
 test('queue box: Enter queues, a paste keeps its newlines, ↑ takes back, Esc interrupts', async () => {
   const written = [];
   const queue = [];

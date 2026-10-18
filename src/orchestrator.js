@@ -165,8 +165,9 @@ export async function orchestrate(text, { agents, profile, brain, history = [], 
     // The last agent failed and the model gave up although another agent is ready:
     // hand the same task to the next one ourselves (once per failure).
     if (!wanted.length && calls.length && !calls.at(-1).ok && !calls.at(-1).retried && avail.length) {
-      calls.at(-1).retried = true;
-      on.fallback?.(calls.at(-1).agent, avail[0]);
+      const last = calls.at(-1);
+      last.retried = true;
+      on.fallback?.(last.agent, avail[0]);
       wanted.push({ name: `ask_${avail[0]}`, agent: avail[0], task: lastTask, fallback: true });
     }
     if (!wanted.length) {
@@ -202,17 +203,27 @@ export async function orchestrate(text, { agents, profile, brain, history = [], 
         seen.add(key);
         on.delegate?.(c.agent, c.task || text);
         lastTask = c.task || text;
-        const res = await callAgent(c.agent, agentPrompt(c.task, text), { task: c.task });
-        calls.push({ agent: c.agent, ok: !!res?.ok });
+        // The next agent after one that stopped partway finishes the job, whatever task
+        // the model wrote for it (a small model just repeats the original).
+        const prior = calls.findLast((x) => x.partial && !x.handedOff && x.agent !== c.agent);
+        if (prior) prior.handedOff = true;
+        const prompt = agentPrompt(c.task, text);
+        const res = await callAgent(c.agent, prior ? continueTask(prompt, prior) : prompt, { task: c.task });
+        // An agent that stopped partway (a usage limit mid-job) has already changed things.
+        const partial = !res?.ok && res?.text?.trim() ? res.text.trim().slice(-600) : '';
+        calls.push({ agent: c.agent, ok: !!res?.ok, ...(partial ? { partial, why: (res.errors || []).join('; ').slice(0, 200) } : {}) });
         lastText = res?.text || '';
         if (res?.ok) content = `done. Answer (the user has seen it in full):\n${lastText.slice(-(o.resultChars || 1500))}`;
         else {
-          // Take the agent out and point the model at the next one, with the same task.
+          // Take the agent out and point the model at the next one.
           avail = avail.filter((a) => a !== c.agent);
           tools = agentTools(avail, profile, { missions: missions && !calls.length, remember, limbs });
           const why = !res ? 'NOT RUN: blocked or unavailable' : `FAILED: ${(res.errors || []).join('; ').slice(0, 300) || 'error'}`;
-          content = `${why}. Nothing was done; do not say it succeeded. ${c.agent} is unavailable now.`
-            + (avail.length ? ` Call ask_${avail[0]} with the same task now.` : ' No other agent is available: tell the user in one sentence.');
+          content = partial
+            ? `${why}. ${c.agent} stopped partway: it already did part of the work (files may be changed). Its last words: "${partial}". Do not say it succeeded. ${c.agent} is unavailable now.`
+              + (avail.length ? ` Call ask_${avail[0]} to finish it: tell it to check the current state first (git status, git diff), then do only what is left of the task, not redo finished work.` : ' No other agent is available: tell the user what was done and what is left, in two sentences.')
+            : `${why}. Nothing was done; do not say it succeeded. ${c.agent} is unavailable now.`
+              + (avail.length ? ` Call ask_${avail[0]} with the same task now.` : ' No other agent is available: tell the user in one sentence.');
         }
       }
       messages.push({ role: 'tool', tool_name: c.name, content });
@@ -229,6 +240,11 @@ export async function orchestrate(text, { agents, profile, brain, history = [], 
   const transcript = messages.slice(1 + history.length).filter((x) => x !== nudge).map((x) => (x.role === 'tool' ? { ...x, content: x.content.slice(0, 600) } : x));
   if (transcript.at(-1)?.role === 'assistant' && !transcript.at(-1).tool_calls) transcript.at(-1).content = final;
   return { handled: true, calls, final, transcript };
+}
+
+// The task for the agent that takes over from one that stopped partway: finish, don't redo.
+export function continueTask(task, { agent, partial, why }) {
+  return `${task}\n\n${agent} already started this and stopped partway${why ? ` (${why})` : ''}. What it reported last:\n"${partial}"\nFirst check the current state (git status, git diff, the files it touched), then do only what is left. Do not redo work that is already done; say what you finished.`;
 }
 
 // Does this closing line mostly repeat the agent's answer? (half its words are in it)
