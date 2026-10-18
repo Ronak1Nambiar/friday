@@ -1,0 +1,6 @@
+{
+  "id": "db-choice-research",
+  "kind": "research",
+  "title": "Researched recommendation",
+  "goal": "Research only, build nothing: a single-user desktop app (Electron) stores about 1 million rows of sensor time-series locally and runs aggregate queries over them (hourly averages across months). Compare SQLite, DuckDB and PostgreSQL for it and recommend one. Cover setup and packaging with the app, speed on analytical queries, write patterns, file size, concurrency, and the risks of the choice."
+}

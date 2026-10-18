@@ -1,0 +1,47 @@
+{
+  "name": "@ronak1nambiar/friday",
+  "version": "0.1.0",
+  "description": "Use every AI subscription you already pay for: one terminal cockpit that drives Claude Code, Codex, Gemini, opencode and Ollama, runs missions in the background (research, build on a branch, cross-AI review, fixes) and asks you on your phone.",
+  "type": "module",
+  "bin": {
+    "friday": "bin/friday.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "hud",
+    "context",
+    "assets",
+    "docs/QUICKSTART.md",
+    "docs/GUIDE.md",
+    "docs/ARCHITECTURE.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/friday.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ronak1Nambiar/friday.git"
+  },
+  "homepage": "https://github.com/Ronak1Nambiar/friday#readme",
+  "keywords": [
+    "ai",
+    "agents",
+    "claude-code",
+    "codex",
+    "gemini",
+    "ollama",
+    "cli",
+    "orchestration"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

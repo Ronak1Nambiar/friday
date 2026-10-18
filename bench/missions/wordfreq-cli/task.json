@@ -1,0 +1,6 @@
+{
+  "id": "wordfreq-cli",
+  "kind": "build",
+  "title": "New CLI from a spec",
+  "goal": "Build a command-line tool in Node.js 20 with no dependencies: `node wordfreq.js <file> [--top N]` prints the N most frequent words in the file (default 10), one per line as `<word> <count>`, most frequent first, ties in alphabetical order. A word is a run of the letters a-z, compared case-insensitively and printed in lowercase; everything else separates words. A missing file prints an error to stderr and exits with code 1. Put wordfreq.js in the project root and include tests runnable with `npm test`."
+}

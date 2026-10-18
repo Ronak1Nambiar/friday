@@ -1,0 +1,6 @@
+{
+  "id": "splitbill-fix",
+  "kind": "build",
+  "title": "Bug fix in an existing repo",
+  "goal": "In this repo, splitBill(totalCents, n) in src/money.js sometimes returns shares that do not add up to the total (try 100 cents between 3 people). Fix it: the shares must always sum to totalCents, differ from each other by at most 1 cent, and the larger shares come first. Keep the function's name, arguments and errors. Add tests for the bug; `npm test` must pass."
+}

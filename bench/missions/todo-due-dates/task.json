@@ -1,0 +1,6 @@
+{
+  "id": "todo-due-dates",
+  "kind": "build",
+  "title": "Feature in an existing repo",
+  "goal": "Add due dates to this todo CLI. `node todo.js add \"<text>\" --due YYYY-MM-DD` stores a due date; an invalid date (wrong format or not a real day) prints an error to stderr, exits with code 1 and adds nothing. `node todo.js list` shows the date as ` (due YYYY-MM-DD)` after the text. `node todo.js list --overdue` lists only open (not done) todos whose due date is before today's local date. Todos without --due work as before, and todos.json files written by the current version still load. Add tests runnable with `npm test`."
+}
