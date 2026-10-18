@@ -6,23 +6,23 @@ import { test } from 'node:test';
 import { designLinkIn, designPrompt, findDesignSystem, implementPrompt, paneCommand, resyncPrompt, testCommandFor, watchHandoff } from '../src/design.js';
 
 test('a pasted claude.ai/design link becomes the design project, and prompts work without sync notes', () => {
-  const app = { name: 'thoughtspace', display: 'Thoughtspace', dir: '/r/ts' };
+  const app = { name: 'myapp', display: 'MyApp', dir: '/r/myapp' };
   assert.equal(designLinkIn('redesign the UI', app), null);
   assert.equal(designLinkIn('see https://claude.ai/design/x', app), null);
-  const ds = designLinkIn('make no mistakes https://claude.ai/design/p/22DA50C4-c281-4e36-baec-9db40616b4ea.', app);
-  assert.equal(ds.project, '22da50c4-c281-4e36-baec-9db40616b4ea');
-  assert.equal(ds.link, 'https://claude.ai/design/p/22DA50C4-c281-4e36-baec-9db40616b4ea');
-  assert.equal(findDesignSystem(app, { designSystems: { thoughtspace: { project: ds.project, link: ds.link } } }).project, ds.project);
+  const ds = designLinkIn('redesign it https://claude.ai/design/p/AAAA1111-2222-4333-8444-555555555555.', app);
+  assert.equal(ds.project, 'aaaa1111-2222-4333-8444-555555555555');
+  assert.equal(ds.link, 'https://claude.ai/design/p/AAAA1111-2222-4333-8444-555555555555');
+  assert.equal(findDesignSystem(app, { designSystems: { myapp: { project: ds.project, link: ds.link } } }).project, ds.project);
   const prompt = designPrompt({ request: 'r', app, ds, handoff: '/cfg/design/1.json' });
-  assert.match(prompt, /already exists in Claude Design: https:\/\/claude\.ai\/design\/p\/22DA50C4/);
+  assert.match(prompt, /already exists in Claude Design: https:\/\/claude\.ai\/design\/p\/AAAA1111/);
   assert.match(prompt, /Do not make a new design/);
-  assert.match(prompt, /"link": "https:\/\/claude\.ai\/design\/p\/22DA50C4-c281-4e36-baec-9db40616b4ea"/);
+  assert.match(prompt, /"link": "https:\/\/claude\.ai\/design\/p\/AAAA1111-2222-4333-8444-555555555555"/);
   const first = paneCommand({ prompt: 'p', repoDir: '/r/ts', session: 'abc' });
   assert.deepEqual(first.slice(0, 4), ['claude', 'p', '--session-id', 'abc']);
   const again = paneCommand({ prompt: null, repoDir: '/r/ts', session: 'abc', resume: true });
   assert.deepEqual(again.slice(0, 3), ['claude', '--resume', 'abc']);
-  const saved = findDesignSystem(app, { designSystems: { thoughtspace: { project: ds.project, link: ds.link } } });
-  assert.match(designPrompt({ request: 'r', app, ds: saved, handoff: '/h.json' }), /Work in the Claude Design project 22da50c4/);
+  const saved = findDesignSystem(app, { designSystems: { myapp: { project: ds.project, link: ds.link } } });
+  assert.match(designPrompt({ request: 'r', app, ds: saved, handoff: '/h.json' }), /Work in the Claude Design project aaaa1111/);
   assert.match(resyncPrompt({ app, ds, branch: 'b' }), /\.design-sync\/NOTES\.md \(create it/);
 });
 
