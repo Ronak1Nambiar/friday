@@ -1,6 +1,6 @@
 // Agent adapters. Each one drives a headless CLI (or HTTP API) and turns its
 // event stream into a small common vocabulary: text, tool, done, error.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,7 +15,7 @@ export const AGENTS = {
     color: [217, 119, 87],
     bin: 'claude',
     args(prompt, session, mode) {
-      const perm = { plan: 'plan', edit: 'acceptEdits', yolo: 'bypassPermissions' }[mode];
+      const perm = claudePermission(mode);
       const a = ['-p', prompt, '--output-format', 'stream-json', '--verbose',
         '--include-partial-messages', '--permission-mode', perm];
       if (session.id) a.push('--resume', session.id);
@@ -26,7 +26,7 @@ export const AGENTS = {
     // control_request lines and wait for the user's answer (--permission-prompt-tool stdio;
     // without it, headless Claude denies them all).
     liveArgs(session, mode) {
-      const perm = { plan: 'plan', edit: 'acceptEdits', yolo: 'bypassPermissions' }[mode];
+      const perm = claudePermission(mode);
       const a = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
         '--include-partial-messages', '--permission-mode', perm, '--permission-prompt-tool', 'stdio'];
       if (session.id) a.push('--resume', session.id);
@@ -158,6 +158,29 @@ export const AGENTS = {
     http: true,
   },
 };
+
+// FRIDAY's edit mode for Claude. acceptEdits asks before every shell command, and each
+// question stops the job until someone answers (a long job waited all night on one).
+// Claude Code's auto mode lets its own check approve routine commands and refuse risky
+// ones (force-push, reset --hard) without stopping. Older versions without it keep
+// acceptEdits. FRIDAY_CLAUDE_EDIT=acceptEdits (or any mode) overrides.
+let claudeAuto = null;
+export function claudeSupportsAuto(help = null) {
+  if (help != null) return /permission-mode[\s\S]{0,200}"auto"/.test(help);
+  if (claudeAuto === null) {
+    try {
+      const c = process.platform === 'win32' ? winCommand('claude', ['--help']) : { file: which('claude') || 'claude', args: ['--help'], shell: false };
+      claudeAuto = claudeSupportsAuto(execFileSync(c.file, c.args, { encoding: 'utf8', timeout: 15000, shell: c.shell, stdio: ['ignore', 'pipe', 'ignore'] }));
+    } catch { claudeAuto = false; }
+  }
+  return claudeAuto;
+}
+export function claudePermission(mode, { env = process.env, auto = claudeSupportsAuto } = {}) {
+  if (mode === 'plan') return 'plan';
+  if (mode === 'yolo') return 'bypassPermissions';
+  if (env.FRIDAY_CLAUDE_EDIT) return env.FRIDAY_CLAUDE_EDIT;
+  return auto() ? 'auto' : 'acceptEdits';
+}
 
 function cap(s) { return s[0].toUpperCase() + s.slice(1); }
 const fmtWait = (ms) => (ms >= 60000 ? `${Math.round(ms / 60000)}m` : `${Math.round(ms / 1000)}s`);

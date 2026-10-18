@@ -531,7 +531,7 @@ must allow a provider before one may be called, and keys come only from the envi
 
 | Agent | Command | Mode mapping (plan / edit / yolo) |
 |---|---|---|
-| Claude Code | one process per session kept running: `claude -p --input-format stream-json --output-format stream-json --include-partial-messages`, one message per line; `--resume <id>` when it has to start again | `--permission-mode` plan / acceptEdits / bypassPermissions |
+| Claude Code | one process per session kept running: `claude -p --input-format stream-json --output-format stream-json --include-partial-messages`, one message per line; `--resume <id>` when it has to start again | `--permission-mode` plan / auto (edit mode; acceptEdits on a Claude Code without auto, or `FRIDAY_CLAUDE_EDIT`) / bypassPermissions. Auto runs routine commands and refuses risky ones, so a job never stops on a question nobody is there to answer |
 | Codex | `codex exec --json`, `codex exec resume <id>` | `sandbox_mode` read-only / workspace-write / `--dangerously-bypass-approvals-and-sandbox` |
 | Gemini | `gemini -p -o stream-json`, `--resume latest` | `--approval-mode` plan / auto_edit / yolo |
 | opencode | `opencode run --format json`, `--session <id>` | `--agent plan` / default / `--auto` |

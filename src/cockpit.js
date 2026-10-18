@@ -177,7 +177,7 @@ const HELP = [
   ['/brain', 'a menu: the model behind FRIDAY in the cloud (OpenRouter, fast) or on this machine (Ollama), which model, sign in or out · typed: /brain cloud|local|auto, /brain model <id>'],
   ['/login', 'sign in to OpenRouter in your browser (the cloud brain)'],
   ['/rewrite [on|off|<message>]', 'local prompt-writer: status, toggle, or a dry run that shows the rewrite and sends nothing'],
-  ['/mode plan|edit|bypass', 'plan = read-only, edit = file edits ok, bypass = no permission questions · shift+tab cycles · /bypass toggles'],
+  ['/mode plan|edit|bypass', 'plan = read-only, edit = edits and routine commands run (Claude\'s auto mode refuses risky ones instead of stopping to ask), bypass = everything runs · shift+tab cycles · /bypass toggles'],
   ['/new', 'fresh sessions for every agent in this folder'],
   ['/resume  (← on empty)', 'browse past conversations and pick one up where it left off'],
   ['/cd <path>', 'change working folder'],

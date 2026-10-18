@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { AGENTS, closeLive, describeTool, ollamaLoaded, runTurn, sessionExited, settleAgents, touchedPaths, winCommand } from '../src/agents.js';
+import { AGENTS, claudePermission, claudeSupportsAuto, closeLive, describeTool, ollamaLoaded, runTurn, sessionExited, settleAgents, touchedPaths, winCommand } from '../src/agents.js';
 
 function collect(agent, events) {
   const got = { text: '', tools: [], errors: [], done: null };
@@ -49,7 +49,21 @@ test('claude: resume and permission flags', () => {
   assert.deepEqual(a.slice(0, 2), ['-p', 'hi']);
   assert.ok(a.includes('--resume') && a.includes('abc'));
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'plan');
-  assert.equal(AGENTS.claude.args('x', {}, 'edit')[AGENTS.claude.args('x', {}, 'edit').indexOf('--permission-mode') + 1], 'acceptEdits');
+  process.env.FRIDAY_CLAUDE_EDIT = 'acceptEdits';
+  try {
+    assert.equal(AGENTS.claude.args('x', {}, 'edit')[AGENTS.claude.args('x', {}, 'edit').indexOf('--permission-mode') + 1], 'acceptEdits');
+    assert.equal(AGENTS.claude.liveArgs({}, 'edit')[AGENTS.claude.liveArgs({}, 'edit').indexOf('--permission-mode') + 1], 'acceptEdits');
+  } finally { delete process.env.FRIDAY_CLAUDE_EDIT; }
+});
+
+test('claude edit mode: auto (no stop for routine commands) when the CLI has it, else acceptEdits', () => {
+  assert.equal(claudePermission('edit', { env: {}, auto: () => true }), 'auto');
+  assert.equal(claudePermission('edit', { env: {}, auto: () => false }), 'acceptEdits');
+  assert.equal(claudePermission('edit', { env: { FRIDAY_CLAUDE_EDIT: 'acceptEdits' }, auto: () => true }), 'acceptEdits');
+  assert.equal(claudePermission('plan', { env: {}, auto: () => true }), 'plan');
+  assert.equal(claudePermission('yolo', { env: {}, auto: () => true }), 'bypassPermissions');
+  assert.equal(claudeSupportsAuto('  --permission-mode <mode>   Permission mode\n      (choices: "acceptEdits", "auto",\n      "bypassPermissions", "plan")'), true);
+  assert.equal(claudeSupportsAuto('  --permission-mode <mode>   (choices: "acceptEdits", "bypassPermissions", "default", "plan")'), false);
 });
 
 test('codex: thread id, messages, commands, file changes, failures', () => {
