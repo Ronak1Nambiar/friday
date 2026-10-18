@@ -31,6 +31,13 @@ export function findDesignSystem(app, profile = {}) {
   return null;
 }
 
+// A Claude Design project link pasted into a request ("... https://claude.ai/design/p/<id>").
+export function designLinkIn(text, app) {
+  const m = /https?:\/\/claude\.ai\/design\/p\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b[^\s"'<>)]*/i.exec(text || '');
+  if (!m) return null;
+  return { project: m[1].toLowerCase(), link: m[0].replace(/[.,;:!?]+$/, ''), name: `${app?.display || app?.name || 'app'} design`, source: 'link' };
+}
+
 export function readHandoff(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
@@ -54,7 +61,8 @@ export function designPrompt({ request, app, ds, handoff }) {
   return `FRIDAY design step (${cap(userName())} asked FRIDAY: "${request}").
 
 Make this design in Claude Design with your Artifact tool (Design type), for ${app.display || app.name}${app.dir ? ` (repo ${app.dir})` : ''}.
-${ds ? `Use the synced design system "${ds.name}" (Claude Design project ${ds.project}) so the design uses the app's real components and tokens. Sync notes: ${path.join(ds.dir, 'NOTES.md')}.`
+${ds?.dir ? `Use the synced design system "${ds.name}" (Claude Design project ${ds.project}) so the design uses the app's real components and tokens. Sync notes: ${path.join(ds.dir, 'NOTES.md')}.`
+    : ds ? `Work in the Claude Design project ${ds.project}${ds.link ? ` (${ds.link})` : ''}: read it first and build on its components and tokens.`
     : 'This app has no synced design system; work from the repo\'s CSS and components.'}
 
 Rules:
@@ -91,7 +99,7 @@ Report: what matches, what is missing or wrong, and exact fixes.`;
 
 export function resyncPrompt({ app, ds, branch }) {
   return `FRIDAY re-sync step. The design for ${app.display || app.name} was implemented on branch ${branch}.
-Run /design-sync so the Claude Design system "${ds.name}" (project ${ds.project}) matches the new code, following ${path.join(ds.dir, 'NOTES.md')} (entry file, previews, known gotchas). Update NOTES.md with anything new you learn.`;
+Run /design-sync so the Claude Design system "${ds.name}" (project ${ds.project}) matches the new code, following ${ds.dir ? path.join(ds.dir, 'NOTES.md') : '.design-sync/NOTES.md (create it if missing, with the project id)'} (entry file, previews, known gotchas). Update NOTES.md with anything new you learn.`;
 }
 
 export function createDsPrompt({ app }) {

@@ -10,7 +10,7 @@ import { AGENTS, MODES, availableAgents, closeLive, describeTool, geminiLoggedIn
 import { createLedger, detectBilling } from './billing.js';
 import { addTurn, ago, createConvoStore, dumpSessions, loadSessions, newConvo, summarize } from './convos.js';
 import {
-  commitAll, createDsPrompt, designPrompt, designWorktree, findDesignSystem, implementPrompt, paneCommand,
+  commitAll, createDsPrompt, designLinkIn, designPrompt, designWorktree, findDesignSystem, implementPrompt, paneCommand,
   readHandoff, resyncPrompt, reviewPrompt, testCommandFor, watchHandoff,
 } from './design.js';
 import { createHud, openWindow } from './hud-server.js';
@@ -1521,6 +1521,14 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
       }
     }
 
+    // Answering the design-system question without the slash.
+    if (st.design?.phase === 'needs-ds') {
+      const a = line.trim().toLowerCase().replace(/[.!]+$/, '');
+      if (a === 'skip' || a === 'setup') return designCommand(a);
+      const linked = designLinkIn(line, st.design.app);
+      if (linked && line.trim() === linked.link) return startDesign(`${st.design.request} ${linked.link}`);
+    }
+
     // "make the HUD look like C:\pics\cockpit.png", "give the HUD purple accents"
     if (isThemeRequest(line)) return hudTheme(line);
 
@@ -2335,17 +2343,27 @@ export async function startCockpit({ cwd = process.cwd(), noHud = false, resumeI
     const app = designTarget(text);
     if (!app) { out(dim('  which app? name it ("redesign the <app> ...") or /project <name> first\n')); return; }
     if (!installed.includes('claude')) { out(paint(RED, '  Claude Design needs Claude Code\n')); return; }
-    st.design?.watch?.stop();
+    // Asking again while the design-system question is open means "go ahead without one".
+    const prev = st.design;
+    const again = prev?.phase === 'needs-ds' && prev.app.name === app.name;
+    // A pasted claude.ai/design link is that app's design project; remember it.
+    const linked = designLinkIn(text, app);
+    if (linked) {
+      const p = profile();
+      if (p.designSystems?.[app.name]?.project !== linked.project) profiles.save({ ...p, designSystems: { ...(p.designSystems || {}), [app.name]: { project: linked.project, link: linked.link, name: linked.name } } });
+    }
+    prev?.watch?.stop();
     const id = Date.now().toString(36);
     const handoff = path.join(CONFIG_DIR, 'design', `${id}.json`);
     fs.mkdirSync(path.dirname(handoff), { recursive: true });
-    const ds = findDesignSystem(app, profile());
+    const ds = linked || findDesignSystem(app, profile());
     st.design = { id, request: text, app: { name: app.name, display: app.display || app.name, dir: app.dir || null }, ds, handoff, phase: ds ? 'design' : 'needs-ds' };
-    if (!ds) {
+    if (!ds && again) out(dim(`  asked again, so designing ${st.design.app.display} without a design system\n`));
+    else if (!ds) {
       out(`  ${bold(st.design.app.display)} has no Claude Design system yet. Designing from one uses the app's real components and tokens; creating it takes a while.\n`);
-      out(dim('  /design setup  create it first (opens a Claude Code pane) · /design skip  design without it\n'));
+      out(dim('  setup  create it first (opens a Claude Code pane) · skip  design without it · or paste its claude.ai/design link\n'));
       return;
-    }
+    } else if (linked) out(dim(`  using Claude Design project ${linked.project} for ${st.design.app.display} (saved to profile.json designSystems)\n`));
     openDesignPane();
   }
 

@@ -3,7 +3,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { designPrompt, findDesignSystem, implementPrompt, paneCommand, testCommandFor, watchHandoff } from '../src/design.js';
+import { designLinkIn, designPrompt, findDesignSystem, implementPrompt, paneCommand, resyncPrompt, testCommandFor, watchHandoff } from '../src/design.js';
+
+test('a pasted claude.ai/design link becomes the design project, and prompts work without sync notes', () => {
+  const app = { name: 'thoughtspace', display: 'Thoughtspace', dir: '/r/ts' };
+  assert.equal(designLinkIn('redesign the UI', app), null);
+  assert.equal(designLinkIn('see https://claude.ai/design/x', app), null);
+  const ds = designLinkIn('make no mistakes https://claude.ai/design/p/22DA50C4-c281-4e36-baec-9db40616b4ea.', app);
+  assert.equal(ds.project, '22da50c4-c281-4e36-baec-9db40616b4ea');
+  assert.equal(ds.link, 'https://claude.ai/design/p/22DA50C4-c281-4e36-baec-9db40616b4ea');
+  assert.equal(findDesignSystem(app, { designSystems: { thoughtspace: { project: ds.project, link: ds.link } } }).project, ds.project);
+  const prompt = designPrompt({ request: 'r', app, ds, handoff: '/cfg/design/1.json' });
+  assert.match(prompt, /Claude Design project 22da50c4[\s\S]*claude\.ai\/design\/p\//);
+  assert.match(resyncPrompt({ app, ds, branch: 'b' }), /\.design-sync\/NOTES\.md \(create it/);
+});
 
 test('finds a synced design system in the repo or one of its worktrees', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'friday-app-'));
